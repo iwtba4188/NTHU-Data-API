@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import List
+from typing import TypeVar
 from fastapi import APIRouter, HTTPException, Path, Query
 from pydantic import BaseModel, Field
 
@@ -67,16 +67,18 @@ class CourseData(BaseModel):
     required_optional_note: str = Field(..., description="必選修說明：多個必選修班級用tab字元分隔")
 
 
-class Condition(BaseModel):
+class CourseCondition(BaseModel):
     row_field: CourseFieldName = Field(..., description="搜尋的欄位名稱")
     matcher: str = Field(..., description="搜尋的值")
     regex_match: bool = Field(False, description="是否使用正則表達式")
 
 
-class QueryCondition(BaseModel):
-    left_condition: Condition | bool | dict = Field(..., description="左邊的條件，支援巢狀結構")
-    operation: str = Field(None, description="條件之間的運算子")
-    right_condition: Condition | bool | dict = Field(None, description="右邊的條件，支援巢狀結構")
+class CourseQueryCondition(BaseModel):
+    # 此處left_condition和right_condition的型別也可能是QueryCondition本身，受限於python版本<3.11的限制，無法使用Self來指定型別
+    # 詳細請參考：https://peps.python.org/pep-0673/
+    left_condition: CourseCondition | bool = Field(..., description="左邊的條件，支援巢狀結構")
+    operation: str = Field(..., description="條件之間的運算子")
+    right_condition: CourseCondition | bool = Field(..., description="右邊的條件，支援巢狀結構")
 
 
 router = APIRouter(
@@ -157,13 +159,22 @@ async def get_selected_field_and_value_data(
 
 @router.post("/fields/", response_model=list[CourseData])
 async def get_courses_by_condition(
-    query_condition: QueryCondition | Condition,
+    query_condition: CourseQueryCondition | CourseCondition,
     limits: int = Query(None, ge=1, example=5, description="最大回傳資料筆數"),
 ):
     """
     根據條件取得課程。
     """
-    condition = Conditions(use_dict_build=True, dict_build_target=dict(query_condition))
+    if type(query_condition) == CourseCondition:
+        condition = Conditions(
+            query_condition.row_field.name,
+            query_condition.matcher,
+            query_condition.regex_match,
+        )
+    else:
+        condition = Conditions(
+            use_dict_build=True, dict_build_target=dict(query_condition)
+        )
     result = courses.query(condition)[:limits]
     return result
 
@@ -204,7 +215,7 @@ async def get_xclass_courses_list(
     return result
 
 
-@router.get("/searches", response_model=List[CourseData])
+@router.get("/searches", response_model=list[CourseData])
 async def search_by_field_and_value(
     field: CourseFieldName = Query(
         ..., example=CourseFieldName.chinese_title, description="搜尋的欄位名稱"
