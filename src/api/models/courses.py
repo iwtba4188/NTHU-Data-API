@@ -73,7 +73,7 @@ class Condition:
         regex_match(``bool``): 當 ``True`` 時將 matcher 視為正則表達式，反之視為普通字串並使用全等比對。
     """
 
-    def __init__(self, row_field: str, matcher: str, regex_match: bool) -> None:
+    def __init__(self, row_field: str, matcher: str, regex_match: bool = False) -> None:
         self.row_field = row_field.lower()
         self.matcher = matcher
         self.regex_match = regex_match
@@ -102,34 +102,119 @@ class Conditions:
     """
 
     def __init__(
-        self, row_field: str, matcher: str | re.Pattern[str], regex_match: bool = False
+        self,
+        row_field: str = None,
+        matcher: str | re.Pattern[str] = None,
+        regex_match: bool = False,
+        use_dict_build: bool = False,
+        dict_build_target: dict = None,
     ) -> None:
-        self.condition_stat = [Condition(row_field, matcher, regex_match), "and", True]
+        if use_dict_build == True:
+            self.condition_stat = self.build(dict_build_target)
+        else:
+            # self.condition_stat = [Condition(row_field, matcher, regex_match), "and", True]
+            self.condition_stat = {
+                "left_condition": Condition(row_field, matcher, regex_match),
+                "operation": "and",
+                "right_condition": True,
+            }
+
         self.course = None
+
+    def build(self, target: dict) -> dict:
+        print(target)
+        if len(target) == 3:
+            lhs, op, rhs = target.values()
+            if self.is_condition(lhs):
+                # 可以轉換成 Condition 物件
+                try:
+                    lhs = Condition(
+                        lhs["row_field"], lhs["matcher"], lhs["regex_match"]
+                    )
+                except:
+                    lhs = Condition(lhs["row_field"], lhs["matcher"])
+            elif type(lhs) == dict:
+                # 可能是巢狀結構，遞迴處理
+                lhs = self.build(lhs)
+            elif type(lhs) == bool:
+                # 布林值，不處理
+                pass
+            else:
+                raise TypeError("Invalid type of left hand side.")
+
+            if op not in ["and", "or"]:
+                # 如果不是 and 或 or，就是錯誤的運算子或不正確的輸入
+                raise ValueError("Invalid operation.")
+
+            if self.is_condition(rhs):
+                # 可以轉換成 Condition 物件
+                try:
+                    rhs = Condition(
+                        rhs["row_field"], rhs["matcher"], rhs["regex_match"]
+                    )
+                except:
+                    rhs = Condition(rhs["row_field"], rhs["matcher"])
+            elif type(rhs) == dict:
+                # 可能是巢狀結構，遞迴處理
+                rhs = self.build(rhs)
+            elif type(rhs) == bool:
+                # 布林值，不處理
+                pass
+            else:
+                raise TypeError("Invalid type of right hand side.")
+
+            return {
+                "left_condition": lhs,
+                "operation": op,
+                "right_condition": rhs,
+            }
+        else:
+            raise ValueError("Invalid length of target.")
+
+    def is_condition(self, target: dict) -> bool:
+        if (
+            type(target) == dict
+            and len(target) in [2, 3]
+            and "row_field" in target.keys()
+            and "matcher" in target.keys()
+        ):
+            return True
+        else:
+            return False
 
     def __and__(self, condition2):
         """Override bitwise ``and`` operator 當成 logical ``and``。"""
 
-        self.condition_stat = [self.condition_stat, "and", condition2.condition_stat]
+        # self.condition_stat = [self.condition_stat, "and", condition2.condition_stat]
+        self.condition_stat = {
+            "left_condition": self.condition_stat,
+            "operation": "and",
+            "right_condition": condition2.condition_stat,
+        }
         return self
 
     def __or__(self, condition2):
         """Override bitwise ``or`` operator 當成 logical ``or``。"""
 
-        self.condition_stat = [self.condition_stat, "or", condition2.condition_stat]
+        # self.condition_stat = [self.condition_stat, "or", condition2.condition_stat]
+        self.condition_stat = {
+            "left_condition": self.condition_stat,
+            "operation": "or",
+            "right_condition": condition2.condition_stat,
+        }
         return self
 
-    def _solve_condition_stat(self, data: list) -> bool:
+    def _solve_condition_stat(self, data: dict) -> bool:
         """遞迴函式，拆分成 左手邊、運算子、右手邊，將左右手遞迴解成 ``bool`` 之後，再算出這一層的結果。"""
 
-        lhs, op, rhs = data
+        lhs, op, rhs = data.values()
 
-        if type(lhs) == list:
+        if type(lhs) == dict:
             lhs = self._solve_condition_stat(lhs)
         elif type(lhs) == Condition:
             lhs = lhs.check(self.course)
 
-        if type(rhs) == list:
+        if type(rhs) == dict:
             rhs = self._solve_condition_stat(rhs)
         elif type(rhs) == Condition:
             rhs = rhs.check(self.course)

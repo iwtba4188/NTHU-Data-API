@@ -67,6 +67,18 @@ class CourseData(BaseModel):
     required_optional_note: str = Field(..., description="必選修說明：多個必選修班級用tab字元分隔")
 
 
+class Condition(BaseModel):
+    row_field: CourseFieldName = Field(..., description="搜尋的欄位名稱")
+    matcher: str = Field(..., description="搜尋的值")
+    regex_match: bool = Field(False, description="是否使用正則表達式")
+
+
+class QueryCondition(BaseModel):
+    left_condition: Condition | bool | dict = Field(..., description="左邊的條件，支援巢狀結構")
+    operation: str = Field(None, description="條件之間的運算子")
+    right_condition: Condition | bool | dict = Field(None, description="右邊的條件，支援巢狀結構")
+
+
 router = APIRouter(
     prefix="/courses",
     tags=["courses"],
@@ -139,6 +151,19 @@ async def get_selected_field_and_value_data(
     取得指定欄位滿足搜尋值的課程列表。
     """
     condition = Conditions(field_name, value, False)
+    result = courses.query(condition)[:limits]
+    return result
+
+
+@router.post("/fields/", response_model=list[CourseData])
+async def get_courses_by_condition(
+    query_condition: QueryCondition | Condition,
+    limits: int = Query(None, ge=1, example=5, description="最大回傳資料筆數"),
+):
+    """
+    根據條件取得課程。
+    """
+    condition = Conditions(use_dict_build=True, dict_build_target=dict(query_condition))
     result = courses.query(condition)[:limits]
     return result
 
